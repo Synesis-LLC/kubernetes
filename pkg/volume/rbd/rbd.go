@@ -89,7 +89,6 @@ func (plugin *rbdPlugin) RequiresRemount() bool {
 func (plugin *rbdPlugin) GetAccessModes() []api.PersistentVolumeAccessMode {
 	return []api.PersistentVolumeAccessMode{
 		api.ReadWriteOnce,
-		api.ReadOnlyMany,
 	}
 }
 

@@ -23,70 +23,48 @@ package rbd
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
+	"net"
 	"os"
 	"path"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/golang/glog"
 	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/util/exec"
 	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/util/node"
 	"k8s.io/kubernetes/pkg/volume"
 )
+
 
 const (
 	imageWatcherStr = "watcher="
 )
 
 // search /sys/bus for rbd device that matches given pool and image
-func getDevFromImageAndPool(pool, image string) (string, bool) {
-	// /sys/bus/rbd/devices/X/name and /sys/bus/rbd/devices/X/pool
-	sys_path := "/sys/bus/rbd/devices"
-	if dirs, err := ioutil.ReadDir(sys_path); err == nil {
-		for _, f := range dirs {
-			// pool and name format:
-			// see rbd_pool_show() and rbd_name_show() at
-			// https://github.com/torvalds/linux/blob/master/drivers/block/rbd.c
-			name := f.Name()
-			// first match pool, then match name
-			po := path.Join(sys_path, name, "pool")
-			img := path.Join(sys_path, name, "name")
-			exe := exec.New()
-			out, err := exe.Command("cat", po, img).CombinedOutput()
-			if err != nil {
-				continue
-			}
-			matched, err := regexp.MatchString("^"+pool+"\n"+image+"\n$", string(out))
-			if err != nil || !matched {
-				continue
-			}
-			// found a match, check if device exists
-			devicePath := "/dev/rbd" + name
-			if _, err := os.Lstat(devicePath); err == nil {
-				return devicePath, true
-			}
-		}
+func isPathExist(path string) (bool) {
+	if _, err := os.Lstat(path); err == nil {
+		return true
 	}
-	return "", false
+
+	return false
 }
 
 // stat a path, if not exists, retry maxRetries times
-func waitForPath(pool, image string, maxRetries int) (string, bool) {
+func waitForPath(path string, maxRetries int) (bool) {
 	for i := 0; i < maxRetries; i++ {
-		devicePath, found := getDevFromImageAndPool(pool, image)
+		found := isPathExist(path)
 		if found {
-			return devicePath, true
+			return true
 		}
 		time.Sleep(time.Second)
 	}
-	return "", false
+	return false
 }
 
 // make a directory like /var/lib/kubelet/plugins/kubernetes.io/pod/rbd/pool-image-image
@@ -100,68 +78,313 @@ func (util *RBDUtil) MakeGlobalPDName(rbd rbd) string {
 	return makePDNameInternal(rbd.plugin.host, rbd.Pool, rbd.Image)
 }
 
-func (util *RBDUtil) rbdLock(b rbdMounter, lock bool) error {
-	var err error
-	var output, locker string
-	var cmd []byte
-	var secret_opt []string
+type ImageWatcher struct {
+	Address string `xml:"address"`
+	Client  string `xml:"client"`
+	Cookie  uint64 `xml:"cookie"`
+}
 
-	if b.Secret != "" {
-		secret_opt = []string{"--key=" + b.Secret}
-	} else {
-		secret_opt = []string{"-k", b.Keyring}
+type LockInfo struct {
+	Name string
+	Locker string
+}
+
+func logCmdInvoke(cmd string, args []string, output string) {
+	glog.Infof("CMD: %s %s. Output: %s", cmd, strings.Join(args, " "), output)
+}
+
+func getOwnIPList() map[string]bool {
+	ownIPList := map[string]bool{}
+
+	ifaces, err := net.Interfaces()
+
+	if (err != nil) {
+		return ownIPList
 	}
-	// construct lock id using host name and a magic prefix
-	lock_id := "kubelet_lock_magic_" + node.GetHostname("")
 
-	l := len(b.Mon)
-	// avoid mount storm, pick a host randomly
-	start := rand.Int() % l
-	// iterate all hosts until mount succeeds.
-	for i := start; i < start+l; i++ {
-		mon := b.Mon[i%l]
-		// cmd "rbd lock list" serves two purposes:
-		// for fencing, check if lock already held for this host
-		// this edge case happens if host crashes in the middle of acquiring lock and mounting rbd
-		// for defencing, get the locker name, something like "client.1234"
-		cmd, err = b.plugin.execCommand("rbd",
-			append([]string{"lock", "list", b.Image, "--pool", b.Pool, "--id", b.Id, "-m", mon}, secret_opt...))
-		output = string(cmd)
+	for _, iface := range ifaces {
+		addrs, _ := iface.Addrs()
 
-		if err != nil {
-			continue
-		}
-
-		if lock {
-			// check if lock is already held for this host by matching lock_id and rbd lock id
-			if strings.Contains(output, lock_id) {
-				// this host already holds the lock, exit
-				glog.V(1).Infof("rbd: lock already held for %s", lock_id)
-				return nil
-			}
-			// hold a lock: rbd lock add
-			cmd, err = b.plugin.execCommand("rbd",
-				append([]string{"lock", "add", b.Image, lock_id, "--pool", b.Pool, "--id", b.Id, "-m", mon}, secret_opt...))
-		} else {
-			// defencing, find locker name
-			ind := strings.LastIndex(output, lock_id) - 1
-			for i := ind; i >= 0; i-- {
-				if output[i] == '\n' {
-					locker = output[(i + 1):ind]
-					break
-				}
-			}
-			// remove a lock: rbd lock remove
-			cmd, err = b.plugin.execCommand("rbd",
-				append([]string{"lock", "remove", b.Image, lock_id, locker, "--pool", b.Pool, "--id", b.Id, "-m", mon}, secret_opt...))
-		}
-
-		if err == nil {
-			//lock is acquired
-			break
+		for _, addr := range addrs {
+			ownIPList[strings.Split(addr.String(), "/")[0]] = true
 		}
 	}
+
+	return ownIPList
+}
+
+func createCephConfFile(secret string, monitors []string) (string, error) {
+	f, err := ioutil.TempFile("", "ceph.conf")
+
+	if err != nil {
+		return "", err
+	}
+
+	defer f.Close()
+	defer f.Sync()
+
+	monitorsString := strings.Join(monitors, ",")
+
+	f.WriteString(fmt.Sprintf(`
+[global]
+mon host = %s
+mon addr = %s
+key = %s
+`, monitorsString, monitorsString, secret))
+
+	return f.Name(), err
+}
+
+func removeFromBlacklist(address string, mounter rbdMounter, cephConfFileName string) error {
+	args := []string{"osd", "blacklist", "rm", address, "-c=" + cephConfFileName}
+
+	cmd, err := mounter.plugin.execCommand("ceph", args)
+	output := string(cmd)
+
+	logCmdInvoke("ceph", args, output)
+
+	if err != nil {
+		glog.Error("Failed to remove client from OSD blackilist.", output)
+	}
+
 	return err
+}
+
+func addToBlacklist(address string, mounter rbdMounter, cephConfFileName string) error {
+	args := []string{"osd", "blacklist", "add", address, "-c=" + cephConfFileName}
+
+	cmd, err := mounter.plugin.execCommand("ceph", args)
+	output := string(cmd)
+
+	logCmdInvoke("ceph", args, output)
+
+	if err != nil {
+		glog.Error("Failed to remove client from OSD blackilist.", output)
+	}
+
+	return err
+}
+
+func listLocks(mounter rbdMounter, cephConfFileName string) (LockInfo, error) {
+	args := []string{"lock", "list", mounter.Image, "--pool", mounter.Pool, "--id", mounter.Id, "--format=json",
+		"-c=" + cephConfFileName}
+
+	cmd, err := mounter.plugin.execCommand("rbd", args)
+	output := string(cmd)
+
+	// First lines may contain warning messages.
+	outputLines := strings.Split(output, "\n")
+	outputStr := outputLines[len(outputLines) - 1]
+
+	logCmdInvoke("rbd", args, output)
+
+	if err != nil {
+		glog.Errorf("Failed to run rbd lock list. Error: %s", output)
+
+		return LockInfo{}, err
+	}
+
+	var outputMap map[string] interface{}
+
+	err = json.Unmarshal([]byte(outputStr), &outputMap)
+
+	var outputLockInfo LockInfo
+
+	for lockName, lockInfo := range outputMap {
+		outputLockInfo.Name = lockName
+
+		lockInfoAsMap := lockInfo.(map[string] interface{})
+
+		outputLockInfo.Locker = lockInfoAsMap["locker"].(string)
+	}
+
+	glog.Infof("Lock info: %+v", outputLockInfo)
+
+	return outputLockInfo, nil
+}
+
+func listImageWatchers(mounter rbdMounter, cephConfFileName string)  ([]ImageWatcher, error) {
+	// We need to use XML output format instead of JSON due to invalid output of "rbd status" command.
+	args := []string{"status", mounter.Image, "--pool", mounter.Pool, "--id", mounter.Id, "-c=" + cephConfFileName,
+		"--format=xml"}
+
+	cmd, err := mounter.plugin.execCommand("rbd", args)
+
+	output := string(cmd)
+
+	// First lines may contain warning messages.
+	outputLines := strings.Split(output, "\n")
+	outputStr := outputLines[len(outputLines) - 1]
+
+	logCmdInvoke("rbd", args, outputStr)
+
+	if (err != nil) {
+		glog.Errorf("Failed to run rbd status command. Error: %s", output)
+		return []ImageWatcher{}, err
+	}
+
+	type Result struct {
+		XMLName  xml.Name `xml:"status"`
+		Watchers []ImageWatcher `xml:"watchers>watcher"`
+	}
+
+	var outputNative Result
+
+	err = xml.Unmarshal([]byte(outputStr), &outputNative)
+
+	if (err != nil) {
+		glog.Error("Failed to parse rbd status XML.")
+
+		return []ImageWatcher{}, err
+	}
+
+	return outputNative.Watchers, nil
+}
+
+// remove a lock: rbd lock remove
+func removeLock(mounter rbdMounter, lockInfo LockInfo, cephConfFileName string) error {
+	if lockInfo.Name == "" {
+		return nil
+	}
+
+	args := []string{"lock", "remove", mounter.Image, lockInfo.Name, lockInfo.Locker, "--pool", mounter.Pool,
+			"--id", mounter.Id, "-c=" + cephConfFileName}
+
+	glog.Infof("Remove RBD lock. Name: %s locker: %s", lockInfo.Name, lockInfo.Locker)
+
+	cmd, err := mounter.plugin.execCommand("rbd", args)
+	output := string(cmd)
+
+	logCmdInvoke("rbd", args, output)
+
+	if err != nil {
+		glog.Errorf("Failed to remove RBD lock. Error: %s", output)
+	}
+
+	return err
+}
+
+// add a lock: rbd lock add
+func addLock(mounter rbdMounter, lockID string, cephConfFileName string) error {
+	args := []string{"lock", "add", mounter.Image, lockID, "--pool", mounter.Pool, "--id", mounter.Id,
+		"-c=" + cephConfFileName}
+
+	cmd, err := mounter.plugin.execCommand("rbd", args)
+	output := string(cmd)
+
+	logCmdInvoke("rbd", args, output)
+
+	if err != nil {
+		glog.Errorf("Failed to add RBD lock. Error: %s", output)
+	}
+
+	return err
+}
+
+func addWatchersToBlacklist(watchers []ImageWatcher, b rbdMounter, cephConfFileName string) error {
+	ownIPList := getOwnIPList()
+
+	for _, watcher := range watchers {
+		address := watcher.Address
+		ip := strings.Split(address, ":")[0]
+
+		if _, exists := ownIPList[ip]; exists {
+			fmt.Printf("Found own IP: %s. It will be removed from the OSD blacklist.\n", ip)
+			err := removeFromBlacklist(address, b, cephConfFileName)
+
+			if err != nil {
+				return err
+			}
+
+		} else {
+			fmt.Printf("Found foreign IP: %s. It will be added to the OSD blacklist.\n", ip)
+			err := addToBlacklist(address, b, cephConfFileName)
+
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (util *RBDUtil) rbdLock(b rbdMounter, lock bool) error {
+	// construct lock id using host name and a magic prefix
+	lockID := "kubelet_lock_magic_" + node.GetHostname("")
+
+	cephConfFileName, err := createCephConfFile(b.Secret, b.Mon)
+
+	if err != nil {
+		glog.Errorf("Failed to create ceph conf file. Error: %s", err.Error())
+
+		return err
+	}
+
+	defer os.Remove(cephConfFileName)
+
+	// cmd "rbd lock list" serves two purposes:
+	// for fencing, check if lock already held for this host
+	// this edge case happens if host crashes in the middle of acquiring lock and mounting rbd
+	// for defencing, get the locker name, something like "client.1234"
+	lockInfo, err := listLocks(b, cephConfFileName)
+
+	if err != nil {
+		return err
+	}
+
+	// check if lock is already held for this host by matching lock_id and rbd lock id
+	if lockInfo.Name == lockID {
+		// this host already holds the lock, exit
+		if lock {
+			glog.V(1).Infof("rbd: lock already held for %s", lockID)
+			return nil
+		}
+	}
+
+	if ! lock {
+		if lockInfo.Name == lockID {
+			return removeLock(b, lockInfo, cephConfFileName)
+		}
+
+		glog.Warning("Skipping unlocking RBD image with foreign lock")
+		return nil
+	}
+
+	err = removeLock(b, lockInfo, cephConfFileName)
+
+	if err != nil {
+		return err
+	}
+
+	err = addLock(b, lockID, cephConfFileName)
+
+	if err != nil {
+		return err
+	}
+
+	watchers, err := listImageWatchers(b, cephConfFileName)
+
+	if err != nil {
+		glog.Errorf("Failed to list RBD image watchers. Error: %s", err.Error())
+
+		return err
+	}
+
+	err = addWatchersToBlacklist(watchers, b, cephConfFileName)
+
+	if err != nil {
+		return err
+	}
+
+	// Make sure that RBD lock was acquired by us
+	lockInfo, err = listLocks(b, cephConfFileName)
+
+	if lockInfo.Name != lockID {
+		return errors.New("Concurent RBD locking detected. Interrupt image mapping.")
+	}
+
+	return nil
 }
 
 func (util *RBDUtil) persistRBD(rbd rbdMounter, mnt string) error {
@@ -174,7 +397,7 @@ func (util *RBDUtil) persistRBD(rbd rbdMounter, mnt string) error {
 
 	encoder := json.NewEncoder(fp)
 	if err = encoder.Encode(rbd); err != nil {
-		return fmt.Errorf("rbd: encode err: %v.", err)
+		return fmt.Errorf("rbd: encode err: %v", err)
 	}
 
 	return nil
@@ -190,7 +413,7 @@ func (util *RBDUtil) loadRBD(mounter *rbdMounter, mnt string) error {
 
 	decoder := json.NewDecoder(fp)
 	if err = decoder.Decode(mounter); err != nil {
-		return fmt.Errorf("rbd: decode err: %v.", err)
+		return fmt.Errorf("rbd: decode err: %v", err)
 	}
 
 	return nil
@@ -217,41 +440,51 @@ func (util *RBDUtil) AttachDisk(b rbdMounter) error {
 	var err error
 	var output []byte
 
-	devicePath, found := waitForPath(b.Pool, b.Image, 1)
-	if !found {
-		// modprobe
-		_, err = b.plugin.execCommand("modprobe", []string{"rbd"})
-		if err != nil {
-			return fmt.Errorf("rbd: failed to modprobe rbd error:%v", err)
-		}
-		// rbd map
-		l := len(b.Mon)
-		// avoid mount storm, pick a host randomly
-		start := rand.Int() % l
-		// iterate all hosts until mount succeeds.
-		for i := start; i < start+l; i++ {
-			mon := b.Mon[i%l]
-			glog.V(1).Infof("rbd: map mon %s", mon)
-			if b.Secret != "" {
-				output, err = b.plugin.execCommand("rbd",
-					[]string{"map", b.Image, "--pool", b.Pool, "--id", b.Id, "-m", mon, "--key=" + b.Secret})
-			} else {
-				output, err = b.plugin.execCommand("rbd",
-					[]string{"map", b.Image, "--pool", b.Pool, "--id", b.Id, "-m", mon, "-k", b.Keyring})
-			}
-			if err == nil {
-				break
-			}
-			glog.V(1).Infof("rbd: map error %v %s", err, string(output))
-		}
-		if err != nil {
-			return fmt.Errorf("rbd: map failed %v %s", err, string(output))
-		}
-		devicePath, found = waitForPath(b.Pool, b.Image, 10)
-		if !found {
-			return errors.New("Could not map image: Timeout after 10s")
-		}
+	// modprobe
+	_, err = b.plugin.execCommand("modprobe", []string{"rbd"})
+	if err != nil {
+		return fmt.Errorf("rbd: failed to modprobe rbd error:%v", err)
 	}
+	// rbd map
+	l := len(b.Mon)
+	// avoid mount storm, pick a host randomly
+	start := rand.Int() % l
+	// iterate all hosts until mount succeeds.
+
+	for i := start; i < start+l; i++ {
+		mon := b.Mon[i%l]
+		glog.V(1).Infof("rbd: map mon %s", mon)
+
+		mapArgs := []string{"map", b.Image, "--pool", b.Pool, "--id", b.Id, "-m", mon, "-o", "noshare"}
+
+		if b.Secret != "" {
+			mapArgs = append(mapArgs, "--key=" + b.Secret)
+		} else {
+			mapArgs = append(mapArgs, "-k", b.Keyring)
+		}
+
+		output, err = b.plugin.execCommand("rbd", mapArgs)
+		logCmdInvoke("rbd", mapArgs, string(output))
+
+		if err == nil {
+			break
+		}
+		glog.V(1).Infof("rbd: map error %v %s", err, string(output))
+	}
+	if err != nil {
+		return fmt.Errorf("rbd: map failed %v %s", err, string(output))
+	}
+
+	outputLines := strings.Split(strings.Trim(string(output), "\n "), "\n")
+	devicePath := outputLines[len(outputLines) - 1]
+
+	glog.Infof("Wait for mapped RBD device path: %s", devicePath)
+
+	found := waitForPath(devicePath, 10)
+	if !found {
+		return errors.New("Could not map image: Timeout after 10s")
+	}
+
 	// mount it
 	globalPDPath := b.manager.MakeGlobalPDName(*b.rbd)
 	notMnt, err := b.mounter.IsLikelyNotMountPoint(globalPDPath)
