@@ -28,6 +28,8 @@ import (
 	"k8s.io/kubernetes/pkg/util/removeall"
 	"k8s.io/kubernetes/pkg/volume"
 	volumetypes "k8s.io/kubernetes/pkg/volume/util/types"
+	"os"
+	"k8s.io/kubernetes/pkg/util/mount"
 )
 
 // ListVolumesForPod returns a map of the mounted volumes for the given pod.
@@ -106,16 +108,24 @@ func (kl *Kubelet) cleanupOrphanedPodDirs(pods []*v1.Pod, runningPods []*kubecon
 			glog.V(3).Infof("Orphaned pod %q found, but volumes are not cleaned up", uid)
 			continue
 		}
-		// If there are still volume directories, do not delete directory
+		// Check whether volume is still mounted on disk. If so, do not delete directory
 		volumePaths, err := kl.getPodVolumePathListFromDisk(uid)
-		if err != nil {
+		if err != nil && os.IsExist(err) {
 			orphanVolumeErrors = append(orphanVolumeErrors, fmt.Errorf("Orphaned pod %q found, but error %v occurred during reading volume dir from disk", uid, err))
 			continue
-		}
-		if len(volumePaths) > 0 {
-			orphanVolumeErrors = append(orphanVolumeErrors, fmt.Errorf("Orphaned pod %q found, but volume paths are still present on disk.", uid))
+		} else if len(volumePaths) > 0 {
+			for _, path := range volumePaths {
+				notMount, err := mount.IsNotMountPoint(kl.mounter, path)
+				if err == nil && notMount {
+					glog.V(2).Infof("Volume path %q is no longer mounted, remove it", path)
+					os.Remove(path)
+				} else {
+					orphanVolumeErrors = append(orphanVolumeErrors, fmt.Errorf("Orphaned pod %q found, but volume paths are still present on disk.", uid))
+				}
+			}
 			continue
 		}
+
 		glog.V(3).Infof("Orphaned pod %q found, removing", uid)
 		if err := removeall.RemoveAllOneFilesystem(kl.mounter, kl.getPodDir(uid)); err != nil {
 			glog.Errorf("Failed to remove orphaned pod %q dir; err: %v", uid, err)
