@@ -456,7 +456,13 @@ func (util *RBDUtil) AttachDisk(b rbdMounter) error {
 	notMnt, err := b.mounter.IsLikelyNotMountPoint(globalPDPath)
 	// in the first time, the path shouldn't exist and IsLikelyNotMountPoint is expected to get NotExist
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("rbd: %s failed to check mountpoint", globalPDPath)
+		glog.Warningf("Detected not cleanely unmounted rbd directory. Try to unmount first.")
+
+		if err = b.mounter.Unmount(globalPDPath); err != nil {
+			return fmt.Errorf("Failed to umount rbd directory: %s\nError: %v", globalPDPath, err)
+		}
+
+		notMnt = true
 	}
 	if !notMnt {
 		return nil
