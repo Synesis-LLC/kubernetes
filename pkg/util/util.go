@@ -109,6 +109,24 @@ func ReadDirNoStat(dirname string) ([]string, error) {
 	return f.Readdirnames(-1)
 }
 
+// ReadDirNamesNoExit reads the directory named by dirname and returns
+// a list of directory entries
+func ReadDirNamesNoExit(dirname string) ([]string, error) {
+	if dirname == "" {
+		dirname = "."
+	}
+
+	f, err := os.Open(dirname)
+
+	if err != nil {
+		return []string{}, err
+	}
+
+	defer f.Close()
+
+	return f.Readdirnames(-1)
+}
+
 // IntPtr returns a pointer to an int
 func IntPtr(i int) *int {
 	o := i
