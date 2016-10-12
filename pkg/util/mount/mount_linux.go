@@ -174,6 +174,14 @@ func (mounter *Mounter) IsLikelyNotMountPoint(file string) (bool, error) {
 func IsNotMountPoint(file string) (bool, error) {
 	stat, err := os.Stat(file)
 	if err != nil {
+		pathError := err.(*os.PathError)
+
+		// It looks like i/o error on network disk (e.g. RBD), so we can unmount it
+		// TODO: Use /proc/mounts
+		if pathError.Err == syscall.EIO {
+			return false, nil
+		}
+
 		return true, err
 	}
 	rootStat, err := os.Lstat(file + "/..")
