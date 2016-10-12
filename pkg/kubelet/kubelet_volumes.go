@@ -108,22 +108,36 @@ func (kl *Kubelet) cleanupOrphanedPodDirs(pods []*v1.Pod, runningPods []*kubecon
 			glog.V(3).Infof("Orphaned pod %q found, but volumes are not cleaned up", uid)
 			continue
 		}
-		// Check whether volume is still mounted on disk. If so, do not delete directory
+		// Check whether volume is still mounted on disk. If so, try to unmount first otherwise do not delete directory
 		volumePaths, err := kl.getPodVolumePathListFromDisk(uid)
 		if err != nil && os.IsExist(err) {
 			orphanVolumeErrors = append(orphanVolumeErrors, fmt.Errorf("Orphaned pod %q found, but error %v occurred during reading volume dir from disk", uid, err))
 			continue
 		} else if len(volumePaths) > 0 {
+			mounter := mount.New("")
+			failedToUnmount := false
+
 			for _, path := range volumePaths {
 				notMount, err := mount.IsNotMountPoint(kl.mounter, path)
+
 				if err == nil && notMount {
 					glog.V(2).Infof("Volume path %q is no longer mounted, remove it", path)
 					os.Remove(path)
 				} else {
-					orphanVolumeErrors = append(orphanVolumeErrors, fmt.Errorf("Orphaned pod %q found, but volume paths are still present on disk.", uid))
+					glog.V(3).Infof("Try to unmount orphaned pod %q volume: %s", uid, path)
+					if err = mounter.Unmount(path); err != nil {
+						orphanVolumeErrors = append(orphanVolumeErrors, fmt.Errorf("Orphaned pod %q found, but volume paths are still present on disk.", uid))
+						failedToUnmount = true
+
+						continue
+					}
 				}
 			}
-			continue
+
+			if failedToUnmount {
+				continue
+			}
+
 		}
 
 		glog.V(3).Infof("Orphaned pod %q found, removing", uid)
