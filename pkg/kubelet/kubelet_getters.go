@@ -261,7 +261,7 @@ func (kl *Kubelet) getPodVolumePathListFromDisk(podUID types.UID) ([]string, err
 	for _, volumePluginDir := range volumePluginDirs {
 		volumePluginName := volumePluginDir.Name()
 		volumePluginPath := path.Join(podVolDir, volumePluginName)
-		volumeDirs, err := util.ReadDirNoStat(volumePluginPath)
+		volumeDirs, err := util.ReadDirNamesNoExit(volumePluginPath)
 		if err != nil {
 			return volumes, fmt.Errorf("Could not read directory %s: %v", volumePluginPath, err)
 		}

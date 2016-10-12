@@ -25,6 +25,7 @@ import (
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/types"
 	utilerrors "k8s.io/kubernetes/pkg/util/errors"
+	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/util/sets"
 	"k8s.io/kubernetes/pkg/volume"
 	volumetypes "k8s.io/kubernetes/pkg/volume/util/types"
@@ -104,22 +105,36 @@ func (kl *Kubelet) cleanupOrphanedPodDirs(
 			glog.V(3).Infof("Orphaned pod %q found, but volumes are not cleaned up", uid)
 			continue
 		}
-		// Check whether volume is still mounted on disk. If so, do not delete directory
+		// Check whether volume is still mounted on disk. If so, try to unmount first otherwise do not delete directory
 		volumePaths, err := kl.getPodVolumePathListFromDisk(uid)
 		if err != nil && os.IsExist(err) {
 			glog.Errorf("Orphaned pod %q found, but error %v occured during reading volume dir from disk", uid, err)
 			continue
 		} else if len(volumePaths) > 0 {
+			mounter := mount.New("")
+			failedToUnmount := false
+
 			for _, path := range volumePaths {
 				notMount, err := mount.IsNotMountPoint(path)
+
 				if err == nil && notMount {
 					glog.V(2).Infof("Volume path %q is no longer mounted, remove it", path)
 					os.Remove(path)
 				} else {
-					glog.Errorf("Orphaned pod %q found, but it might still mounted with error %v", uid, err)
+					glog.V(3).Infof("Try to unmount orphaned pod %q volume: %s", uid, path)
+					if err = mounter.Unmount(path); err != nil {
+						glog.Warningf("Failed to unmount orphaned pod %q, volume: %s err: %v", uid, path, err)
+						failedToUnmount = true
+
+						continue
+					}
 				}
 			}
-			continue
+
+			if failedToUnmount {
+				continue
+			}
+
 		}
 
 		glog.V(3).Infof("Orphaned pod %q found, removing", uid)
