@@ -29,6 +29,7 @@ import (
 	"k8s.io/kubernetes/pkg/api/v1"
 	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume"
+	"syscall"
 )
 
 // Abstract interface to disk operations.
@@ -44,6 +45,18 @@ type diskManager interface {
 	DeleteImage(deleter *rbdVolumeDeleter) error
 }
 
+func isPathWithIOErrors(path string) bool {
+	_, err := os.Stat(path)
+
+	if err == nil {
+		return false
+	}
+
+	pathError := err.(*os.PathError)
+
+	return pathError.Err == syscall.EIO
+}
+
 // utility to mount a disk based filesystem
 func diskSetUp(manager diskManager, b rbdMounter, volPath string, mounter mount.Interface, fsGroup *int64) error {
 	globalPDPath := manager.MakeGlobalPDName(*b.rbd)
@@ -54,9 +67,27 @@ func diskSetUp(manager diskManager, b rbdMounter, volPath string, mounter mount.
 		glog.Errorf("cannot validate mountpoint: %s", volPath)
 		return err
 	}
+
 	if !notMnt {
-		return nil
+		if !isPathWithIOErrors(volPath) {
+			return nil
+		}
+
+		// It looks like an I/O error on network disk (e.g. RBD), so we can and must unmount it
+		if err := mounter.Unmount(volPath); err != nil {
+			glog.Errorf("failed to umount %s", volPath)
+			return err
+		}
 	}
+
+	if isPathWithIOErrors(globalPDPath) {
+		// It looks like an I/O error on network disk (e.g. RBD), so we can and must unmount it
+		if err := mounter.Unmount(globalPDPath); err != nil {
+			glog.Errorf("failed to umount %s", volPath)
+			return err
+		}
+	}
+
 	if err := manager.AttachDisk(b); err != nil {
 		glog.Errorf("failed to attach disk")
 		return err
