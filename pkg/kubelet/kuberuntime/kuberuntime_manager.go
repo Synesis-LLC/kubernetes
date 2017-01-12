@@ -106,6 +106,9 @@ type kubeGenericRuntimeManager struct {
 
 	// The version cache of runtime daemon.
 	versionCache *cache.ObjectCache
+
+	// Multiply physical CPU count by this factor to calculate effective number of CPU
+	cpuConversionFactor float32;
 }
 
 type KubeGenericRuntime interface {
@@ -132,6 +135,7 @@ func NewKubeGenericRuntimeManager(
 	cpuCFSQuota bool,
 	runtimeService internalApi.RuntimeService,
 	imageService internalApi.ImageManagerService,
+	cpuConversionFactor float32,
 ) (KubeGenericRuntime, error) {
 	kubeRuntimeManager := &kubeGenericRuntimeManager{
 		recorder:            recorder,
@@ -145,6 +149,7 @@ func NewKubeGenericRuntimeManager(
 		runtimeService:      runtimeService,
 		imageService:        imageService,
 		keyring:             credentialprovider.NewDockerKeyring(),
+		cpuConversionFactor: cpuConversionFactor,
 	}
 
 	typedVersion, err := kubeRuntimeManager.runtimeService.Version(kubeRuntimeAPIVersion)

@@ -604,6 +604,7 @@ func NewMainKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *Kub
 			klet.cpuCFSQuota,
 			runtimeService,
 			kuberuntime.NewInstrumentedImageManagerService(imageService),
+			kubeCfg.ExperimentalCpuConversionFactor,
 		)
 		if err != nil {
 			return nil, err
@@ -643,6 +644,7 @@ func NewMainKubelet(kubeCfg *componentconfig.KubeletConfiguration, kubeDeps *Kub
 				// runtime to set the flag instead.
 				klet.hairpinMode == componentconfig.HairpinVeth && kubeCfg.NetworkPluginName != "kubenet",
 				kubeCfg.SeccompProfileRoot,
+				kubeCfg.ExperimentalCpuConversionFactor,
 				kubeDeps.ContainerRuntimeOptions...,
 			)
 			klet.containerRuntime = runtime
@@ -1350,6 +1352,7 @@ func (kl *Kubelet) GetClusterDNS(pod *api.Pod) ([]string, []string, error) {
 func (kl *Kubelet) syncPod(o syncPodOptions) error {
 	// pull out the required options
 	pod := o.pod
+
 	mirrorPod := o.mirrorPod
 	podStatus := o.podStatus
 	updateType := o.updateType

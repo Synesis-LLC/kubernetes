@@ -473,6 +473,8 @@ type KubeletConfiguration struct {
 	// (binaries, etc.) to mount the volume are available on the underlying node. If the check is enabled
 	// and fails the mount operation fails.
 	ExperimentalCheckNodeCapabilitiesBeforeMount bool `json:"ExperimentalCheckNodeCapabilitiesBeforeMount,omitempty"`
+	// Multiply physical CPU count by this factor to calculate effective number of CPU
+	ExperimentalCpuConversionFactor float32 `json:"ExperimentalCpuConversionFactor,omitempty"`
 }
 
 type KubeletAuthorizationMode string
