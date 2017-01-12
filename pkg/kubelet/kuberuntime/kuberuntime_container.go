@@ -30,6 +30,7 @@ import (
 
 	"github.com/golang/glog"
 	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/api/resource"
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	runtimeApi "k8s.io/kubernetes/pkg/kubelet/api/v1alpha1/runtime"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
@@ -196,6 +197,13 @@ func (m *kubeGenericRuntimeManager) generateLinuxContainerConfig(container *api.
 	var cpuShares int64
 	cpuRequest := container.Resources.Requests.Cpu()
 	cpuLimit := container.Resources.Limits.Cpu()
+
+	cpuRequest = resource.NewMilliQuantity(int64(float32(cpuRequest.MilliValue())/m.cpuConversionFactor),
+	resource.DecimalSI)
+
+	cpuLimit = resource.NewMilliQuantity(int64(float32(cpuLimit.MilliValue())/m.cpuConversionFactor),
+	resource.DecimalSI)
+
 	memoryLimit := container.Resources.Limits.Memory().Value()
 	oomScoreAdj := int64(qos.GetContainerOOMScoreAdjust(pod, container,
 		int64(m.machineInfo.MemoryCapacity)))

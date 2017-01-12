@@ -43,6 +43,7 @@ import (
 	cadvisorapi "github.com/google/cadvisor/info/v1"
 
 	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/api/resource"
 	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/client/record"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
@@ -189,6 +190,9 @@ type DockerManager struct {
 
 	// Directory to host local seccomp profiles.
 	seccompProfileRoot string
+
+	// Multiply physical CPU count by this factor to calculate effective number of CPU
+	cpuConversionFactor float32;
 }
 
 // A subset of the pod.Manager interface extracted for testing purposes.
@@ -232,6 +236,7 @@ func NewDockerManager(
 	enableCustomMetrics bool,
 	hairpinMode bool,
 	seccompProfileRoot string,
+	cpuConversionFactor float32,
 	options ...kubecontainer.Option) *DockerManager {
 	// Wrap the docker client with instrumentedDockerInterface
 	client = NewInstrumentedDockerInterface(client)
@@ -281,6 +286,7 @@ func NewDockerManager(
 		configureHairpinMode:   hairpinMode,
 		imageStatsProvider:     newImageStatsProvider(client),
 		seccompProfileRoot:     seccompProfileRoot,
+		cpuConversionFactor:    cpuConversionFactor,
 	}
 	cmdRunner := kubecontainer.DirectStreamingRunner(dm)
 	dm.runner = lifecycle.NewHandlerRunner(httpClient, cmdRunner, dm)
@@ -626,8 +632,16 @@ func (dm *DockerManager) runContainer(
 		}
 	}
 	memoryLimit := container.Resources.Limits.Memory().Value()
+
 	cpuRequest := container.Resources.Requests.Cpu()
 	cpuLimit := container.Resources.Limits.Cpu()
+
+	cpuRequest = resource.NewMilliQuantity(int64(float32(cpuRequest.MilliValue())/dm.cpuConversionFactor),
+	resource.DecimalSI)
+
+	cpuLimit = resource.NewMilliQuantity(int64(float32(cpuLimit.MilliValue())/dm.cpuConversionFactor),
+	resource.DecimalSI)
+
 	var cpuShares int64
 	// If request is not specified, but limit is, we want request to default to limit.
 	// API server does this for new containers, but we repeat this logic in Kubelet
