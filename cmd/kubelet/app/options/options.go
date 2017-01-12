@@ -300,4 +300,5 @@ func (c *kubeletConfiguration) addFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.ExperimentalNodeAllocatableIgnoreEvictionThreshold, "experimental-allocatable-ignore-eviction", c.ExperimentalNodeAllocatableIgnoreEvictionThreshold, "When set to 'true', Hard Eviction Thresholds will be ignored while calculating Node Allocatable. See https://git.k8s.io/community/contributors/design-proposals/node-allocatable.md for more details. [default=false]")
 
 	fs.Var(&c.ExperimentalQOSReserved, "experimental-qos-reserved", "A set of ResourceName=Percentage (e.g. memory=50%) pairs that describe how pod resource requests are reserved at the QoS level. Currently only memory is supported. [default=none]")
+	fs.Float32Var(&c.ExperimentalCpuConversionFactor, "experimental-cpu-conversion-factor", c.ExperimentalCpuConversionFactor, "[Experimental] Multiply physical CPU count by this factor to calculate effective number of CPU")
 }
