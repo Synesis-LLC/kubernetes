@@ -568,6 +568,8 @@ type KubeletConfiguration struct {
 	// This flag, if set, will avoid including `EvictionHard` limits while computing Node Allocatable.
 	// Refer to [Node Allocatable](https://git.k8s.io/community/contributors/design-proposals/node-allocatable.md) doc for more information.
 	ExperimentalNodeAllocatableIgnoreEvictionThreshold bool `json:"experimentalNodeAllocatableIgnoreEvictionThreshold,omitempty"`
+	// Multiply physical CPU count by this factor to calculate effective number of CPU
+	ExperimentalCpuConversionFactor float32 `json:"ExperimentalCpuConversionFactor,omitempty"`
 }
 
 type KubeletAuthorizationMode string
