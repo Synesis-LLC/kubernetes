@@ -47,6 +47,7 @@ func newETCD2Client(tr *http.Transport, serverList []string) (etcd2client.Client
 	cli, err := etcd2client.New(etcd2client.Config{
 		Endpoints: serverList,
 		Transport: tr,
+		HeaderTimeoutPerRequest: 5 * time.Second,
 	})
 	if err != nil {
 		return nil, err
