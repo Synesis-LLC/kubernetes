@@ -339,7 +339,7 @@ func (mounter *SafeFormatAndMount) formatAndMount(source string, target string, 
 
 	// Run fsck on the disk to fix repairable issues
 	glog.V(4).Infof("Checking for issues with fsck on disk: %s", source)
-	args := []string{"-a", source}
+	args := []string{"-y", source}
 	cmd := mounter.Runner.Command("fsck", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
