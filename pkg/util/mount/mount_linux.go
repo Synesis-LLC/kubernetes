@@ -359,49 +359,6 @@ func (mounter *SafeFormatAndMount) formatAndMount(source string, target string, 
 	// Try to mount the disk
 	glog.V(4).Infof("Attempting to mount disk: %s %s %s", fstype, source, target)
 	err = mounter.Interface.Mount(source, target, fstype, options)
-	if err != nil {
-		// It is possible that this disk is not formatted. Double check using diskLooksUnformatted
-		notFormatted, err := mounter.diskLooksUnformatted(source)
-		if err == nil && notFormatted {
-			args = []string{source}
-			// Disk is unformatted so format it.
-			// Use 'ext4' as the default
-			if len(fstype) == 0 {
-				fstype = "ext4"
-			}
-			if fstype == "ext4" || fstype == "ext3" {
-				args = []string{"-F", source}
-			}
-			glog.Infof("Disk %q appears to be unformatted, attempting to format as type: %q with options: %v", source, fstype, args)
-			cmd := mounter.Runner.Command("mkfs."+fstype, args...)
-			_, err := cmd.CombinedOutput()
-			if err == nil {
-				// the disk has been formatted successfully try to mount it again.
-				glog.Infof("Disk successfully formatted (mkfs): %s - %s %s", fstype, source, target)
-				return mounter.Interface.Mount(source, target, fstype, options)
-			}
-			glog.Errorf("format of disk %q failed: type:(%q) target:(%q) options:(%q)error:(%v)", source, fstype, target, options, err)
-			return err
-		}
-	}
+
 	return err
-}
-
-// diskLooksUnformatted uses 'lsblk' to see if the given disk is unformated
-func (mounter *SafeFormatAndMount) diskLooksUnformatted(disk string) (bool, error) {
-	args := []string{"-nd", "-o", "FSTYPE", disk}
-	cmd := mounter.Runner.Command("lsblk", args...)
-	glog.V(4).Infof("Attempting to determine if disk %q is formatted using lsblk with args: (%v)", disk, args)
-	dataOut, err := cmd.CombinedOutput()
-	output := strings.TrimSpace(string(dataOut))
-
-	// TODO (#13212): check if this disk has partitions and return false, and
-	// an error if so.
-
-	if err != nil {
-		glog.Errorf("Could not determine if disk %q is formatted (%v)", disk, err)
-		return false, err
-	}
-
-	return output == "", nil
 }
