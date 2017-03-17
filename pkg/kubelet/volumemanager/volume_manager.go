@@ -70,11 +70,11 @@ const (
 	// will retry in the next sync iteration. This frees the associated
 	// goroutine of the pod to process newer updates if needed (e.g., a delete
 	// request to the pod).
-	podAttachAndMountTimeout time.Duration = 2 * time.Minute
+	podAttachAndMountTimeout time.Duration = 6 * time.Minute
 
 	// podAttachAndMountRetryInterval is the amount of time the GetVolumesForPod
 	// call waits before retrying
-	podAttachAndMountRetryInterval time.Duration = 300 * time.Millisecond
+	podAttachAndMountRetryInterval time.Duration = 900 * time.Millisecond
 
 	// waitForAttachTimeout is the maximum amount of time a
 	// operationexecutor.Mount call will wait for a volume to be attached.
@@ -82,11 +82,11 @@ const (
 	// minutes to complete for some volume plugins in some cases. While this
 	// operation is waiting it only blocks other operations on the same device,
 	// other devices are not affected.
-	waitForAttachTimeout time.Duration = 10 * time.Minute
+	waitForAttachTimeout time.Duration = 30 * time.Minute
 
 	// reconcilerStartGracePeriod is the maximum amount of time volume manager
 	// can wait to start reconciler
-	reconcilerStartGracePeriod time.Duration = 60 * time.Second
+	reconcilerStartGracePeriod time.Duration = 180 * time.Second
 )
 
 // VolumeManager runs a set of asynchronous loops that figure out which volumes
