@@ -42,7 +42,7 @@ const (
 
 var (
 	// The default dns opt strings
-	defaultDNSOptions = []string{"ndots:5"}
+	defaultDNSOptions = []string{"ndots:1"}
 )
 
 type podsByID []*kubecontainer.Pod
