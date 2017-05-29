@@ -116,7 +116,7 @@ const (
 	// we want to able to consider SRV lookup names like _dns._udp.kube-dns.default.svc to be considered relative.
 	// hence, setting ndots to be 5.
 	// TODO(yifan): Move this and dockertools.ndotsDNSOption to a common package.
-	defaultDNSOption = "ndots:5"
+	defaultDNSOption = "ndots:1"
 
 	// Annotations for the ENTRYPOINT and CMD for an ACI that's converted from Docker image.
 	// Taken from https://github.com/appc/docker2aci/blob/v0.12.3/lib/common/common.go#L33
