@@ -152,10 +152,9 @@ func (kl *Kubelet) formDNSSearch(hostSearch []string, pod *v1.Pod) []string {
 	}
 
 	nsSvcDomain := fmt.Sprintf("%s.svc.%s", pod.Namespace, kl.clusterDomain)
-	svcDomain := fmt.Sprintf("svc.%s", kl.clusterDomain)
-	dnsSearch := []string{nsSvcDomain, svcDomain, kl.clusterDomain}
+	dnsSearch := []string{nsSvcDomain}
 
-	combinedSearch := append(dnsSearch, hostSearch...)
+	combinedSearch := dnsSearch
 
 	combinedSearch = omitDuplicates(kl, pod, combinedSearch)
 	return formDNSSearchFitsLimits(kl, pod, combinedSearch)
