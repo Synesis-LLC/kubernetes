@@ -436,6 +436,12 @@ func (util *RBDUtil) defencing(c rbdUnmounter) error {
 	return util.rbdLock(*c.rbdMounter, false)
 }
 
+func (util *RBDUtil) unmapRBD(plugin *rbdPlugin, devicePath string) error {
+	_, e := plugin.execCommand("rbd", []string{"unmap", devicePath})
+
+	return e
+}
+
 func (util *RBDUtil) AttachDisk(b rbdMounter) error {
 	var err error
 	var output []byte
@@ -509,7 +515,7 @@ func (util *RBDUtil) AttachDisk(b rbdMounter) error {
 	// fence off other mappers
 	if err := util.fencing(b); err != nil {
 		// rbd unmap before exit
-		b.plugin.execCommand("rbd", []string{"unmap", devicePath})
+		util.unmapRBD(b.plugin, devicePath)
 		return fmt.Errorf("rbd: image %s is locked by other nodes", b.Image)
 	}
 	// rbd lock remove needs ceph and image config
@@ -520,6 +526,8 @@ func (util *RBDUtil) AttachDisk(b rbdMounter) error {
 	util.persistRBD(b, globalPDPath)
 
 	if err = b.mounter.FormatAndMount(devicePath, globalPDPath, b.fsType, nil); err != nil {
+		// rbd unmap before exit
+		util.unmapRBD(b.plugin, devicePath)
 		err = fmt.Errorf("rbd: failed to mount rbd volume %s [%s] to %s, error %v", devicePath, b.fsType, globalPDPath, err)
 	}
 	return err
@@ -536,7 +544,7 @@ func (util *RBDUtil) DetachDisk(c rbdUnmounter, mntPath string) error {
 	// if device is no longer used, see if can unmap
 	if cnt <= 1 {
 		// rbd unmap
-		_, err = c.plugin.execCommand("rbd", []string{"unmap", device})
+		err = util.unmapRBD(c.plugin, device)
 		if err != nil {
 			return fmt.Errorf("rbd: failed to unmap device %s:Error: %v", device, err)
 		}
