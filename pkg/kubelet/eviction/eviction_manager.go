@@ -377,7 +377,8 @@ func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, podFunc Act
 		// do not evict such pods. Static pods are not re-admitted after evictions.
 		// https://github.com/kubernetes/kubernetes/issues/40573 has more details.
 		if utilfeature.DefaultFeatureGate.Enabled(features.ExperimentalCriticalPodAnnotation) &&
-			kubelettypes.IsCriticalPod(pod) && kubepod.IsStaticPod(pod) {
+			kubelettypes.IsCriticalPod(pod) {
+			glog.Infof("eviction manager: NOT evicting critical pod %v", pod.Name)
 			continue
 		}
 		status := v1.PodStatus{
