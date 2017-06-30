@@ -323,6 +323,12 @@ func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, podFunc Act
 			glog.Infof("eviction manager: NOT evicting static pod %v", pod.Name)
 			continue
 		}
+
+		if utilconfig.DefaultFeatureGate.ExperimentalCriticalPodAnnotation() && kubetypes.IsCriticalPod(pod) {
+			glog.Infof("eviction manager: NOT evicting critical pod %v", pod.Name)
+			continue
+		}
+
 		status := api.PodStatus{
 			Phase:   api.PodFailed,
 			Message: fmt.Sprintf(message, resourceToReclaim),
