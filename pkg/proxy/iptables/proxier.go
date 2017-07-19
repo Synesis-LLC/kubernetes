@@ -155,7 +155,7 @@ type endpointsInfo struct {
 func newServiceInfo(service proxy.ServicePortName) *serviceInfo {
 	return &serviceInfo{
 		sessionAffinityType: api.ServiceAffinityNone, // default
-		stickyMaxAgeMinutes: 180,                     // TODO: paramaterize this in the API.
+		stickyMaxAgeMinutes: 1,                       // TODO: paramaterize this in the API.
 	}
 }
 
