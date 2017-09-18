@@ -106,8 +106,7 @@ func AreEqual(first, second api.Toleration) bool {
 	if first.Key == second.Key &&
 		first.Operator == second.Operator &&
 		first.Value == second.Value &&
-		first.Effect == second.Effect &&
-		AreTolerationSecondsEqual(first.TolerationSeconds, second.TolerationSeconds) {
+		first.Effect == second.Effect {
 		return true
 	}
 	return false
