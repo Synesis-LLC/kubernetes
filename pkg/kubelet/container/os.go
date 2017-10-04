@@ -29,6 +29,7 @@ type OSInterface interface {
 	MkdirAll(path string, perm os.FileMode) error
 	Symlink(oldname string, newname string) error
 	Stat(path string) (os.FileInfo, error)
+	Lstat(path string) (os.FileInfo, error)
 	Remove(path string) error
 	RemoveAll(path string) error
 	Create(path string) (*os.File, error)
@@ -56,6 +57,11 @@ func (RealOS) Symlink(oldname string, newname string) error {
 // Stat will call os.Stat to get the FileInfo for a given path
 func (RealOS) Stat(path string) (os.FileInfo, error) {
 	return os.Stat(path)
+}
+
+// Lstat will call os.Lstat to get the FileInfo for a given path
+func (RealOS) Lstat(path string) (os.FileInfo, error) {
+	return os.Lstat(path)
 }
 
 // Remove will call os.Remove to remove the path.

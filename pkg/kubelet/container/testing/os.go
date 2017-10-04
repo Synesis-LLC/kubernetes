@@ -66,6 +66,14 @@ func (f FakeOS) Stat(path string) (os.FileInfo, error) {
 	return nil, errors.New("unimplemented testing mock")
 }
 
+// Lstat is a fake that returns an error
+func (f FakeOS) Lstat(path string) (os.FileInfo, error) {
+	if f.StatFn != nil {
+		return f.StatFn(path)
+	}
+	return nil, errors.New("unimplemented testing mock")
+}
+
 // Remove is a fake call that returns nil.
 func (f *FakeOS) Remove(path string) error {
 	f.Removes = append(f.Removes, path)
